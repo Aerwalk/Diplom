@@ -1,3 +1,5 @@
+import os
+
 import serial
 import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox, filedialog
@@ -8,7 +10,7 @@ import queue
 import serial.tools.list_ports
 from datetime import datetime, timedelta
 import pyperclip
-
+import xml.etree.ElementTree as ET
 
 class LoRaTrackerApp:
     def __init__(self, root):
@@ -132,27 +134,59 @@ class LoRaTrackerApp:
         self.root.after(100, self.process_serial_data)
 
     def update_ui(self, board_id, callsign, lat, lon, time):
-        """Обновляет таблицу UI новыми координатами или обновляет существующую запись."""
+        """Обновляет таблицу UI новыми координатами и сохраняет их в GPX-файл."""
         current_time = datetime.utcnow()
         self.last_update[board_id] = current_time
 
-        # Проверяем, есть ли уже запись с таким ID
+        # Формируем путь к GPX-файлу
+        track_filename = f'{self.path_entry.get()}\\{board_id}_{callsign}.gpx' if callsign != "Unknown" else f'{self.path_entry.get()}\\{board_id}.gpx'
+
+        # Проверяем, существует ли файл
+        file_exists = os.path.exists(track_filename)
+
+        # Открываем файл в режиме добавления
+        with open(track_filename, 'a', encoding='utf-8') as f:
+            if not file_exists:
+                # Если файл не существует, записываем заголовок GPX
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write('<gpx version="1.1" creator="LoRaTrackerApp">\n')
+                f.write('  <trk>\n    <name>LoRa Tracker</name>\n    <trkseg>\n')
+
+            # Записываем новую координату
+            f.write(f'      <trkpt lat="{lat}" lon="{lon}">\n')
+            f.write(f'        <time>{time}</time>\n')
+            f.write(f'      </trkpt>\n')
+
+        # Обновляем UI (отображение в таблице)
         for item in self.tree.get_children():
             values = self.tree.item(item, "values")
             if values and values[0] == board_id:
-                # Обновляем существующую запись
                 self.tree.item(item, values=(board_id, callsign, lat, lon, time, "Да"))
-                self.highlight_row(item, current_time)  # Выделение строки по времени
+                self.highlight_row(item, current_time)
                 break
         else:
-            # Если не нашли запись — создаем новую
             item = self.tree.insert('', 'end', values=(board_id, callsign, lat, lon, time, "Да"))
-            self.highlight_row(item, current_time)  # Выделение строки по времени
+            self.highlight_row(item, current_time)
 
-        track_filename = f'{self.path_entry.get()}\\{board_id}_{callsign}.plt' if callsign != "Unknown" else f'{self.path_entry.get()}\\{board_id}.plt'
-        with open(track_filename, 'a') as f:
-            f.write(f'{lat},{lon},0,0\n')
+    def to_gpx(self, board_id, callsign, lat, lon, time):
+        """Сохраняет координаты в файл GPX."""
+        track_filename = f'{self.path_entry.get()}\\{board_id}_{callsign}.gpx' if callsign != "Unknown" else f'{self.path_entry.get()}\\{board_id}.gpx'
 
+        # Создание структуры GPX
+        gpx = ET.Element("gpx", version="1.1", xmlns="http://www.topografix.com/GPX/1/1")
+        trk = ET.SubElement(gpx, "trk")
+        trkseg = ET.SubElement(trk, "trkseg")
+
+        # Добавляем точку с координатами
+        trkpt = ET.SubElement(trkseg, "trkpt", lat=str(lat), lon=str(lon))
+        time_element = ET.SubElement(trkpt, "time")
+        time_element.text = time
+
+        # Сохраняем файл
+        tree = ET.ElementTree(gpx)
+        tree.write(track_filename, xml_declaration=True, encoding="UTF-8")
+
+        print(f"Данные сохранены в файл: {track_filename}")
     def highlight_row(self, item, current_time):
         """Выделяет строку в таблице в зависимости от времени последнего обновления."""
         board_id = self.tree.item(item, "values")[0]
