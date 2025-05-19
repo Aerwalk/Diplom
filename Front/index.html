@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Meshtastic + Маршруты</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg-color: white;
+      --text-color: black;
+      --nav-bg: #e0e0e0;
+      --link-color: #2c3e50;
+      --link-hover: #1a252f;
+    }
+    body.dark {
+      --bg-color: #1e1e1e;
+      --text-color: white;
+      --nav-bg: #2c3e50;
+      --link-color: white;
+      --link-hover: #66b2ff;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      padding-top: 60px;
+      background: var(--bg-color);
+      color: var(--text-color);
+      box-sizing: border-box;
+    }
+    #map {
+      height: calc(100vh - 60px);
+      width: 100%;
+    }
+    .menu {
+      position: absolute;
+      z-index: 10000;
+      background: var(--bg-color);
+      color: var(--text-color);
+      border: 1px solid #999;
+      display: none;
+      min-width: 200px;
+      padding: 5px;
+      border-radius: 4px;
+    }
+    .menu-item {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    .menu-item:hover {
+      background: rgba(0,0,0,0.1);
+    }
+    #bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 20px;
+      background-color: var(--nav-bg);
+      z-index: 10000;
+      pointer-events: none;
+    }
+    #nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      background: var(--nav-bg);
+      color: var(--text-color);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      z-index: 9999;
+    }
+    #nav a {
+      color: var(--link-color);
+      text-decoration: none;
+      margin-right: 25px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #nav a:hover {
+      color: var(--link-hover);
+      text-decoration: underline;
+    }
+    #themeToggle {
+      font-size: 14px;
+      color: var(--link-color);
+      background: transparent;
+      border: 1px solid var(--link-color);
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="nav">
+  <div>
+    <a href="index.html">🏠 Главная</a>
+    <a id="viewerLink">🗺 Просмотр маршрута</a>
+    <a href="topology.html">🔗 Топология</a>
+  </div>
+  <button id="themeToggle">🌓 Переключить тему</button>
+</div>
+
+<input type="file" id="filePicker" accept=".json" style="display: none;" />
+<div id="map"></div>
+<div id="bottom-bar"></div>
+<div id="contextMenu" class="menu"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([51.529635, 45.980160], 13);
+
+const baseLayers = {
+  "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }),
+  "Esri Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri'
+  }),
+  "OpenTopoMap": L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenTopoMap'
+  }),
+  "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; CartoDB'
+  })
+};
+
+baseLayers["OpenStreetMap"].addTo(map); // по умолчанию
+L.control.layers(baseLayers).addTo(map);
+
+let markers = [];
+const contextMenu = document.getElementById('contextMenu');
+let selectedNode = null;
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+function fetchNodes() {
+  fetch('http://localhost:8000/api/locations')
+    .then(res => res.json())
+    .then(nodes => {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+      nodes.forEach(node => {
+        if (!node.lat || !node.lng) return;
+        const battery = node.battery !== undefined ? node.battery : null;
+        let batteryIcon = "❓", color = "gray";
+        if (battery !== null) {
+          if (battery >= 60) { batteryIcon = "🔋"; color = "green"; }
+          else if (battery >= 30) { batteryIcon = "🟨"; color = "gold"; }
+          else if (battery > 5) { batteryIcon = "🟥"; color = "orange"; }
+          else { batteryIcon = "⚠️"; color = "red"; }
+        }
+        const batteryText = battery !== null ? `${battery}%` : "неизвестно";
+        const marker = L.circleMarker([node.lat, node.lng], {
+          radius: 10, color, fillColor: color, fillOpacity: 0.8
+        }).addTo(map);
+        marker.bindPopup(`${node.name}<br>Lat: ${node.lat}<br>Lng: ${node.lng}<br>${batteryIcon} Заряд: ${batteryText}`);
+        marker.on('contextmenu', e => showMenu(e.originalEvent, node));
+        markers.push(marker);
+      });
+    });
+}
+
+function showInfo(node) {
+  const battery = node.battery !== undefined ? node.battery : null;
+  const voltage = node.voltage !== undefined ? `${node.voltage} V` : "неизвестно";
+  let icon = "❓";
+  if (battery !== null) {
+    if (battery >= 60) icon = "🔋";
+    else if (battery >= 30) icon = "🟨";
+    else if (battery > 5) icon = "🟥";
+    else icon = "⚠️";
+  }
+  const batteryText = battery !== null ? `${battery}%` : "неизвестно";
+  alert(`🧩 Узел: ${node.name}
+🆔 ID: ${node.id}
+📍 Координаты: ${node.lat}, ${node.lng}
+${icon} Заряд: ${batteryText}
+🔌 Напряжение: ${voltage}`);
+}
+
+function showMenu(event, node) {
+  selectedNode = node;
+  contextMenu.innerHTML = '';
+  const items = [
+    { label: 'ℹ️ Информация', action: () => showInfo(node) },
+    { label: '📋 Копировать координаты', action: () => copyCoords(node) },
+    { label: '🧪 Эмулировать передвижение', action: () => simulateRoute(node) }
+  ];
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'menu-item';
+    div.innerText = item.label;
+    div.onclick = () => { contextMenu.style.display = 'none'; item.action(); };
+    contextMenu.appendChild(div);
+  });
+  contextMenu.style.left = event.pageX + 'px';
+  contextMenu.style.top = event.pageY + 'px';
+  contextMenu.style.display = 'block';
+  event.preventDefault();
+}
+
+function copyCoords(node) {
+  navigator.clipboard.writeText(`${node.lat}, ${node.lng}`).then(() => {
+    alert("Координаты скопированы.");
+  });
+}
+
+function simulateRoute(node) {
+  fetch(`http://localhost:8000/api/simulate_extend?id=${node.id}`)
+    .then(res => res.json())
+    .then(() => alert("🧪 Эмуляция завершена."))
+    .catch(err => alert("❌ Ошибка эмуляции: " + err));
+}
+
+document.getElementById("viewerLink").addEventListener("click", () => {
+  const input = document.getElementById("filePicker");
+  input.value = "";
+  input.click();
+  input.onchange = () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const json = JSON.parse(e.target.result);
+      const encoded = encodeURIComponent(JSON.stringify(json));
+      window.open("viewer.html?data=" + encoded);
+    };
+    reader.readAsText(file);
+  };
+});
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  document.body.classList.toggle("dark");
+  localStorage.setItem("theme", document.body.classList.contains("dark") ? "dark" : "light");
+});
+
+if (localStorage.getItem("theme") === "dark") {
+  document.body.classList.add("dark");
+}
+
+document.body.addEventListener("click", () => contextMenu.style.display = "none");
+
+fetchNodes();
+setInterval(fetchNodes, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Просмотр маршрута</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      width: 100%;
+    }
+
+    :root {
+      --bg-color: white;
+      --text-color: black;
+      --nav-bg: #e0e0e0;
+      --link-color: #2c3e50;
+      --link-hover: #1a252f;
+    }
+
+    body.dark {
+      --bg-color: #1e1e1e;
+      --text-color: white;
+      --nav-bg: #2c3e50;
+      --link-color: white;
+      --link-hover: #66b2ff;
+    }
+
+    body {
+      font-family: "Segoe UI", sans-serif;
+      padding-top: 60px;
+      background: var(--bg-color);
+      color: var(--text-color);
+      box-sizing: border-box;
+    }
+
+    #nav {
+      position: fixed;
+      top: 0; left: 0; width: 100%;
+      background: var(--nav-bg);
+      color: var(--text-color);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: left;
+      align-items: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      z-index: 9999;
+    }
+
+    #nav a {
+      color: var(--link-color);
+      text-decoration: none;
+      margin-right: 25px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #nav a:hover {
+      text-decoration: underline;
+      color: var(--link-hover);
+    }
+
+    #themeToggle {
+      margin-left: auto;
+      font-size: 14px;
+      color: var(--link-color);
+      background: transparent;
+      border: 1px solid var(--link-color);
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+
+    #map {
+      height: calc(100vh - 60px);
+      width: 100%;
+      position: relative;
+    }
+    #bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 20px;
+      background-color: var(--nav-bg);
+      z-index: 10000;
+      pointer-events: none;
+    }
+    @media (max-width: 600px) {
+      #nav a { margin-right: 10px; font-size: 14px; }
+      #themeToggle { font-size: 12px; padding: 2px 6px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="nav">
+  <a href="index.html">🏠 Главная</a>
+  <a id="viewerLink">🗺 Просмотр маршрута</a>
+  <a href="topology.html">🔗 Топология</a>
+  <button id="themeToggle">🌓 Переключить тему</button>
+</div>
+
+<input type="file" id="filePicker" accept=".json" style="display: none;" />
+
+<div id="map"></div>
+<div id="bottom-bar"></div>
+
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  document.getElementById("viewerLink").addEventListener("click", () => {
+    const input = document.getElementById("filePicker");
+    input.value = "";
+    input.click();
+    input.onchange = () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const json = JSON.parse(e.target.result);
+        const encoded = encodeURIComponent(JSON.stringify(json));
+        window.open("viewer.html?data=" + encoded);
+      };
+      reader.readAsText(file);
+    };
+  });
+
+  const themeToggle = document.getElementById("themeToggle");
+  const bodyClass = document.body.classList;
+  themeToggle.addEventListener("click", () => {
+    bodyClass.toggle("dark");
+    localStorage.setItem("theme", bodyClass.contains("dark") ? "dark" : "light");
+  });
+
+  if (localStorage.getItem("theme") === "dark") {
+    bodyClass.add("dark");
+  }
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const dataParam = urlParams.get('data');
+  if (!dataParam) {
+    alert("Нет маршрута для отображения");
+    throw new Error("Нет данных");
+  }
+
+  const points = JSON.parse(decodeURIComponent(dataParam));
+  const map = L.map('map').setView([points[0].lat, points[0].lng], 13);
+
+  const baseLayers = {
+    "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }),
+    "Esri Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri'
+    }),
+    "OpenTopoMap": L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenTopoMap contributors'
+    }),
+    "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; CartoDB'
+    })
+  };
+
+  baseLayers["OpenStreetMap"].addTo(map);
+  L.control.layers(baseLayers).addTo(map);
+
+  const latlngs = points.map(p => [p.lat, p.lng]);
+  L.polyline(latlngs, { color: 'blue' }).addTo(map);
+
+  points.forEach(p => {
+    const marker = L.circleMarker([p.lat, p.lng], { radius: 5, color: 'red' }).addTo(map);
+    const popupContent = `
+      <b>⏱ Время:</b> ${p.time || "неизвестно"}<br>
+      <b>📍 Координаты:</b> ${p.lat}, ${p.lng}<br>
+      <button onclick="navigator.clipboard.writeText('${p.lat}, ${p.lng}')">📋 Копировать</button>
+    `;
+    marker.bindPopup(popupContent);
+  });
+</script>
+</body>
+</html>

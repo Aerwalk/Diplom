@@ -1,0 +1,163 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Топология узлов</title>
+  <script src="https://unpkg.com/force-graph"></script>
+  <style>
+    :root {
+      --bg-color: #ffffff;
+      --text-color: #000000;
+      --nav-bg: #f0f0f0;
+      --link-color: #2c3e50;
+    }
+    .dark {
+      --bg-color: #1e1e1e;
+      --text-color: #ffffff;
+      --nav-bg: #2c3e50;
+      --link-color: #ffffff;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      padding-top: 60px;
+    }
+
+    #nav {
+      position: fixed;
+      top: 0; left: 0; width: 100%;
+      background-color: var(--nav-bg);
+      color: var(--text-color);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 999;
+    }
+
+    #nav a {
+      color: var(--link-color);
+      text-decoration: none;
+      margin-right: 20px;
+      font-weight: bold;
+    }
+
+    #themeToggle {
+      padding: 4px 8px;
+      background: transparent;
+      border: 1px solid var(--link-color);
+      color: var(--link-color);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #panel {
+      position: absolute;
+      top: 70px;
+      left: 10px;
+      background: var(--bg-color);
+      color: var(--text-color);
+      border: 1px solid #ccc;
+      padding: 10px;
+      z-index: 999;
+    }
+
+    #topology {
+      width: 100%;
+      height: calc(100vh - 60px);
+      background-color: var(--bg-color);
+    }
+  </style>
+</head>
+<body>
+  <div id="nav">
+    <div>
+      <a href="index.html">🏠 Главная</a>
+      <a href="viewer.html">🗺 Просмотр</a>
+      <a href="topology.html">🔗 Топология</a>
+    </div>
+    <button id="themeToggle">🌓 Переключить тему</button>
+  </div>
+
+  <div id="panel">
+    <b>Отключить узлы:</b>
+    <div id="controls"></div>
+  </div>
+  <div id="topology"></div>
+
+<script>
+  const allNodes = Array.from({length: 20}, (_, i) => ({id: 'node' + (i+1), name: 'Узел ' + (i+1)}));
+  
+  const baseLinks = [];
+  for (let i = 0; i < 20; i++) {
+   // baseLinks.push({ source: "node" + (i+1), target: "node" + ((i+1)%20 + 1) }); // круг
+  }
+  // Добавим дополнительные mesh-связи
+  const meshPairs = [
+    [1, 5], [2, 6], [3, 8], [4, 10], [6, 12], [7, 14], [9, 15], [11, 17], [13, 19], [18, 20]
+  ];
+  meshPairs.forEach(pair => baseLinks.push({ source: "node" + pair[0], target: "node" + pair[1] }));
+
+  for (let i = 0; i < 20; i++) {
+    baseLinks.push({ source: "node" + (i+1), target: "node" + ((i+1)%20 + 1) });
+  }
+
+  let disabledNodes = new Set();
+
+  const graph = ForceGraph()(document.getElementById("topology"))
+    .nodeId('id')
+    .nodeLabel('name')
+    .linkDirectionalParticles(2)
+    .linkDirectionalArrowLength(4)
+    .linkColor(() => getComputedStyle(document.body).getPropertyValue('--text-color').trim())
+    .width(window.innerWidth)
+    .height(window.innerHeight - 60);
+
+  function rebuildGraph() {
+    const nodes = allNodes.filter(n => !disabledNodes.has(n.id));
+    const links = baseLinks.filter(l => !disabledNodes.has(l.source) && !disabledNodes.has(l.target));
+    graph.graphData({ nodes, links });
+  }
+
+  function buildControls() {
+    const container = document.getElementById("controls");
+    container.innerHTML = '';
+    allNodes.forEach(n => {
+      const label = document.createElement("label");
+      label.style.display = "block";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = true;
+      cb.onchange = () => {
+        if (!cb.checked) disabledNodes.add(n.id);
+        else disabledNodes.delete(n.id);
+        rebuildGraph();
+      };
+      label.appendChild(cb);
+      label.append(" " + n.name);
+      container.appendChild(label);
+    });
+  }
+
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    document.body.classList.toggle("dark");
+    document.documentElement.classList.toggle("dark");
+    localStorage.setItem("theme", document.body.classList.contains("dark") ? "dark" : "light");
+    rebuildGraph();
+  });
+
+  // Применить сохранённую тему
+  if (localStorage.getItem("theme") === "dark") {
+    document.body.classList.add("dark");
+    document.documentElement.classList.add("dark");
+  }
+
+  buildControls();
+  rebuildGraph();
+</script>
+</body>
+</html>
